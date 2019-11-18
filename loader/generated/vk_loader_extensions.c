@@ -271,6 +271,11 @@ VKAPI_ATTR bool VKAPI_CALL loader_icd_init_entries(struct loader_icd_term *icd_t
     // ---- VK_EXT_headless_surface extension commands
     LOOKUP_GIPA(CreateHeadlessSurfaceEXT, false);
 
+    // ---- VK_EXT_acquire_wl_display extension commands
+#ifdef VK_USE_PLATFORM_WAYLAND_KHR
+    LOOKUP_GIPA(AcquireWaylandDisplayEXT, false);
+#endif // VK_USE_PLATFORM_WAYLAND_KHR
+
 #undef LOOKUP_GIPA
 
     return true;
@@ -907,6 +912,11 @@ VKAPI_ATTR void VKAPI_CALL loader_init_instance_extension_dispatch_table(VkLayer
 
     // ---- VK_EXT_headless_surface extension commands
     table->CreateHeadlessSurfaceEXT = (PFN_vkCreateHeadlessSurfaceEXT)gpa(inst, "vkCreateHeadlessSurfaceEXT");
+
+    // ---- VK_EXT_acquire_wl_display extension commands
+#ifdef VK_USE_PLATFORM_WAYLAND_KHR
+    table->AcquireWaylandDisplayEXT = (PFN_vkAcquireWaylandDisplayEXT)gpa(inst, "vkAcquireWaylandDisplayEXT");
+#endif // VK_USE_PLATFORM_WAYLAND_KHR
 }
 
 // Device command lookup function
@@ -1535,6 +1545,11 @@ VKAPI_ATTR void* VKAPI_CALL loader_lookup_instance_dispatch_table(const VkLayerI
 
     // ---- VK_EXT_headless_surface extension commands
     if (!strcmp(name, "CreateHeadlessSurfaceEXT")) return (void *)table->CreateHeadlessSurfaceEXT;
+
+    // ---- VK_EXT_acquire_wl_display extension commands
+#ifdef VK_USE_PLATFORM_WAYLAND_KHR
+    if (!strcmp(name, "AcquireWaylandDisplayEXT")) return (void *)table->AcquireWaylandDisplayEXT;
+#endif // VK_USE_PLATFORM_WAYLAND_KHR
 
     *found_name = false;
     return NULL;
@@ -3192,6 +3207,38 @@ VKAPI_ATTR void VKAPI_CALL ResetQueryPoolEXT(
     disp->ResetQueryPoolEXT(device, queryPool, firstQuery, queryCount);
 }
 
+
+// ---- VK_EXT_acquire_wl_display extension trampoline/terminators
+
+#ifdef VK_USE_PLATFORM_WAYLAND_KHR
+VKAPI_ATTR VkResult VKAPI_CALL AcquireWaylandDisplayEXT(
+    VkPhysicalDevice                            physicalDevice,
+    struct wl_display*                          display,
+    struct zwp_drm_lease_manager_v1*            manager,
+    uint32_t                                    pConnectorCount,
+    VkWaylandLeaseConnectorEXT*                 pConnectors) {
+    const VkLayerInstanceDispatchTable *disp;
+    VkPhysicalDevice unwrapped_phys_dev = loader_unwrap_physical_device(physicalDevice);
+    disp = loader_get_instance_layer_dispatch(physicalDevice);
+    return disp->AcquireWaylandDisplayEXT(unwrapped_phys_dev, display, manager, pConnectorCount, pConnectors);
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL terminator_AcquireWaylandDisplayEXT(
+    VkPhysicalDevice                            physicalDevice,
+    struct wl_display*                          display,
+    struct zwp_drm_lease_manager_v1*            manager,
+    uint32_t                                    pConnectorCount,
+    VkWaylandLeaseConnectorEXT*                 pConnectors) {
+    struct loader_physical_device_term *phys_dev_term = (struct loader_physical_device_term *)physicalDevice;
+    struct loader_icd_term *icd_term = phys_dev_term->this_icd_term;
+    if (NULL == icd_term->dispatch.AcquireWaylandDisplayEXT) {
+        loader_log(icd_term->this_instance, VK_DEBUG_REPORT_ERROR_BIT_EXT, 0,
+                   "ICD associated with VkPhysicalDevice does not support AcquireWaylandDisplayEXT");
+    }
+    return icd_term->dispatch.AcquireWaylandDisplayEXT(phys_dev_term->phys_dev, display, manager, pConnectorCount, pConnectors);
+}
+
+#endif // VK_USE_PLATFORM_WAYLAND_KHR
 // GPA helpers for extensions
 bool extension_instance_gpa(struct loader_instance *ptr_instance, const char *name, void **addr) {
     *addr = NULL;
@@ -4062,6 +4109,16 @@ bool extension_instance_gpa(struct loader_instance *ptr_instance, const char *na
         *addr = (void *)ResetQueryPoolEXT;
         return true;
     }
+
+    // ---- VK_EXT_acquire_wl_display extension commands
+#ifdef VK_USE_PLATFORM_WAYLAND_KHR
+    if (!strcmp("vkAcquireWaylandDisplayEXT", name)) {
+        *addr = (ptr_instance->enabled_known_extensions.ext_acquire_wl_display == 1)
+                     ? (void *)AcquireWaylandDisplayEXT
+                     : NULL;
+        return true;
+    }
+#endif // VK_USE_PLATFORM_WAYLAND_KHR
     return false;
 }
 
@@ -4132,6 +4189,12 @@ void extensions_create_instance(struct loader_instance *ptr_instance, const VkIn
         } else if (0 == strcmp(pCreateInfo->ppEnabledExtensionNames[i], VK_FUCHSIA_IMAGEPIPE_SURFACE_EXTENSION_NAME)) {
             ptr_instance->enabled_known_extensions.fuchsia_imagepipe_surface = 1;
 #endif // VK_USE_PLATFORM_FUCHSIA
+
+    // ---- VK_EXT_acquire_wl_display extension commands
+#ifdef VK_USE_PLATFORM_WAYLAND_KHR
+        } else if (0 == strcmp(pCreateInfo->ppEnabledExtensionNames[i], VK_EXT_ACQUIRE_WL_DISPLAY_EXTENSION_NAME)) {
+            ptr_instance->enabled_known_extensions.ext_acquire_wl_display = 1;
+#endif // VK_USE_PLATFORM_WAYLAND_KHR
         }
     }
 }
@@ -4183,7 +4246,7 @@ PFN_vkVoidFunction get_extension_device_proc_terminator(struct loader_device *de
             addr = (PFN_vkVoidFunction)terminator_GetDeviceGroupSurfacePresentModes2EXT;
         }
     }
-#endif // None
+#endif // VK_USE_PLATFORM_WAYLAND_KHR
     return addr;
 }
 
@@ -4385,6 +4448,11 @@ const VkLayerInstanceDispatchTable instance_disp = {
 
     // ---- VK_EXT_headless_surface extension commands
     .CreateHeadlessSurfaceEXT = terminator_CreateHeadlessSurfaceEXT,
+
+    // ---- VK_EXT_acquire_wl_display extension commands
+#ifdef VK_USE_PLATFORM_WAYLAND_KHR
+    .AcquireWaylandDisplayEXT = terminator_AcquireWaylandDisplayEXT,
+#endif // VK_USE_PLATFORM_WAYLAND_KHR
 };
 
 // A null-terminated list of all of the instance extensions supported by the loader.
@@ -4444,5 +4512,8 @@ const char *const LOADER_INSTANCE_EXTENSIONS[] = {
 #endif // VK_USE_PLATFORM_METAL_EXT
                                                   VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME,
                                                   VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME,
+#ifdef VK_USE_PLATFORM_WAYLAND_KHR
+                                                  VK_EXT_ACQUIRE_WL_DISPLAY_EXTENSION_NAME,
+#endif // VK_USE_PLATFORM_WAYLAND_KHR
                                                   NULL };
 

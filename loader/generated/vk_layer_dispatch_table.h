@@ -229,6 +229,11 @@ typedef struct VkLayerInstanceDispatchTable_ {
 
     // ---- VK_EXT_headless_surface extension commands
     PFN_vkCreateHeadlessSurfaceEXT CreateHeadlessSurfaceEXT;
+
+    // ---- VK_EXT_acquire_wl_display extension commands
+#ifdef VK_USE_PLATFORM_WAYLAND_KHR
+    PFN_vkAcquireWaylandDisplayEXT AcquireWaylandDisplayEXT;
+#endif // VK_USE_PLATFORM_WAYLAND_KHR
 } VkLayerInstanceDispatchTable;
 
 // Device function pointer dispatch table
